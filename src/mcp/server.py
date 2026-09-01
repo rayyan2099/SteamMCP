@@ -5,7 +5,6 @@ from src.recommenders.tag_recommender import (
     find_similar_by_tags,
     find_games_by_tags
 )
-from src.recommenders.hybrid_recommender import hybrid_recommend
 from src.search.game_details import get_game_details
 
 mcp = MCPServer("Steam Game Recommender")
@@ -67,29 +66,6 @@ def recommend_by_preferences(
 
     return results.to_dict(orient="records")
 
-@mcp.tool()
-def recommend_hybrid(
-    query: str,
-    tags: list[str],
-    platform: str | None = None
-) -> list[dict]:
-    """
-    Recommend games using both natural language semantic search
-    and explicit Steam tag preferences.
-
-    Semantic similarity contributes 30% of the final score.
-    Tag similarity contributes 70%.
-
-    Optionally filter by platform: windows, mac, or linux.
-    """
-
-    results = hybrid_recommend(
-        query=query,
-        tags=tags,
-        platform=platform
-    )
-
-    return results.to_dict(orient="records")
 
 @mcp.tool()
 def get_game_details_tool(appid: int) -> dict:
