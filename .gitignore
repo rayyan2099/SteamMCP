@@ -1,0 +1,19 @@
+# Environment variables
+.env
+
+# Virtual environment
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Model/cache files
+.cache/
