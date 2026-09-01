@@ -186,8 +186,11 @@ async def run_agent(
 
 
 async def create_mcp_connection():
+    """
+    Create parameters for the persistent MCP server connection.
+    """
 
     return StdioServerParameters(
-        command="python",
+        command=sys.executable,
         args=["-m", "src.mcp.server"]
     )
