@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+import asyncio
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -16,31 +17,14 @@ from src.agent.steam_agent import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    server_params = await create_mcp_connection()
+    app.state.mcp_session = None
+    app.state.groq_tools = None
+    app.state.mcp_lock = asyncio.Lock()
+    app.state.exit_stack = AsyncExitStack()
 
-    async with stdio_client(
-        server_params
-    ) as (read_stream, write_stream):
+    yield
 
-        async with ClientSession(
-            read_stream,
-            write_stream
-        ) as session:
-
-            await session.initialize()
-
-            tools_result = await session.list_tools()
-
-            app.state.mcp_session = session
-            app.state.groq_tools = get_groq_tools(
-                tools_result.tools
-            )
-
-            print("\nSteamMCP server connected successfully.")
-
-            yield
-
-    print("\nSteamMCP server disconnected.")
+    await app.state.exit_stack.aclose()
 
 
 app = FastAPI(
@@ -59,8 +43,60 @@ class RecommendationResponse(BaseModel):
     recommendation: str
 
 
+async def get_mcp_resources():
+
+    if app.state.mcp_session is not None:
+        return (
+            app.state.mcp_session,
+            app.state.groq_tools
+        )
+
+    async with app.state.mcp_lock:
+
+        # Check again after acquiring lock
+        if app.state.mcp_session is not None:
+            return (
+                app.state.mcp_session,
+                app.state.groq_tools
+            )
+
+        server_params = await create_mcp_connection()
+
+        read_stream, write_stream = (
+            await app.state.exit_stack.enter_async_context(
+                stdio_client(server_params)
+            )
+        )
+
+        session = await app.state.exit_stack.enter_async_context(
+            ClientSession(
+                read_stream,
+                write_stream
+            )
+        )
+
+        await session.initialize()
+
+        tools_result = await session.list_tools()
+
+        app.state.mcp_session = session
+        app.state.groq_tools = get_groq_tools(
+            tools_result.tools
+        )
+
+        print(
+            "\nSteamMCP server connected successfully."
+        )
+
+        return (
+            app.state.mcp_session,
+            app.state.groq_tools
+        )
+
+
 @app.get("/")
 async def root():
+
     return {
         "message": "SteamMCP API is running"
     }
@@ -73,12 +109,15 @@ async def root():
 async def recommend_games(
     request: RecommendationRequest
 ):
+
     try:
+
+        session, groq_tools = await get_mcp_resources()
 
         response = await run_agent(
             user_query=request.query,
-            session=app.state.mcp_session,
-            groq_tools=app.state.groq_tools
+            session=session,
+            groq_tools=groq_tools
         )
 
         return {
