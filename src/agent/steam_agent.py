@@ -1,5 +1,4 @@
 from dotenv import load_dotenv
-
 load_dotenv()
 
 import json
@@ -7,6 +6,7 @@ import os
 
 from groq import Groq
 from mcp import Client
+
 
 SYSTEM_PROMPT = """
 You are SteamMCP, an intelligent Steam game recommendation assistant.
@@ -51,6 +51,7 @@ FINAL RESPONSE:
 - Be concise.
 """
 
+
 def get_groq_tools(mcp_tools):
     """Convert MCP tools into Groq function-calling format."""
 
@@ -76,9 +77,7 @@ async def run_agent(
     client: Client,
     groq_tools: list
 ):
-    """
-    Run the SteamMCP agent using a persistent in-process MCP client.
-    """
+    """Run the SteamMCP agent using an in-process MCP client."""
 
     groq_client = Groq(
         api_key=os.environ.get("GROQ_API_KEY")
@@ -112,7 +111,6 @@ async def run_agent(
         }
 
         if message.tool_calls:
-
             assistant_message["tool_calls"] = [
                 {
                     "id": tool_call.id,
@@ -153,13 +151,12 @@ async def run_agent(
             result_content = []
 
             for content in tool_result.content:
-
                 if hasattr(content, "text"):
                     result_content.append(content.text)
 
             tool_output = "\n".join(result_content)
 
-            # Keep the Groq request small enough for the free-tier limit.
+            # Keep the Groq request small.
             max_tool_output_chars = 2000
 
             if len(tool_output) > max_tool_output_chars:
