@@ -16,7 +16,7 @@ from src.agent.steam_agent import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    print(">>> Starting SteamMCP in-process client", flush=True)
+    print(">>> Starting in-process MCP client", flush=True)
 
     async with Client(mcp) as client:
 
@@ -36,14 +36,11 @@ async def lifespan(app: FastAPI):
 
         yield
 
-    print(">>> MCP client disconnected", flush=True)
-
 
 app = FastAPI(
     title="SteamMCP API",
     description="AI-powered Steam game recommendation API",
-    version="1.0.0",
-    lifespan=lifespan
+    version="1.0.0"
 )
 
 
@@ -72,11 +69,9 @@ async def recommend_games(
 
     try:
 
-        print(">>> /recommend request received", flush=True)
-
         response = await run_agent(
             user_query=request.query,
-            session=app.state.mcp_client,
+            client=app.state.mcp_client,
             groq_tools=app.state.groq_tools
         )
 
