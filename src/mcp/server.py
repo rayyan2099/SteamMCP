@@ -5,7 +5,6 @@ from src.recommenders.tag_recommender import (
     find_similar_by_tags,
     find_games_by_tags
 )
-from src.recommenders.semantic_recommender import semantic_search
 from src.recommenders.hybrid_recommender import hybrid_recommend
 from src.search.game_details import get_game_details
 
@@ -63,31 +62,6 @@ def recommend_by_preferences(
     """
     results = find_games_by_tags(
         tags,
-        platform=platform
-    )
-
-    return results.to_dict(orient="records")
-
-@mcp.tool()
-def recommend_by_description(
-    query: str,
-    platform: str | None = None
-) -> list[dict]:
-    """
-    Recommend games based on a natural language description.
-
-    Use this when the user describes the type, mood, gameplay,
-    or vibe of a game they want.
-
-    Examples:
-    - "a difficult dark fantasy action RPG"
-    - "a relaxing farming game"
-    - "a game about exploring space alone"
-
-    Optionally filter by platform: windows, mac, or linux.
-    """
-    results = semantic_search(
-        query,
         platform=platform
     )
 
