@@ -1,13 +1,12 @@
-import sys
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import json
 import os
 
 from groq import Groq
-
-from mcp import ClientSession, StdioServerParameters
+from mcp import Client
 
 
 SYSTEM_PROMPT = """
@@ -40,6 +39,9 @@ SPECIFIC GAMES:
 
 - Then call recommend_similar_games using the correct appid.
 
+- If multiple games are mentioned, search for each game before calling
+  recommend_similar_games for each selected game.
+
 PLATFORM:
 
 - Platform requirements are hard constraints.
@@ -48,13 +50,22 @@ PLATFORM:
 - PC or Windows = windows
 - Linux = linux
 
+USING MULTIPLE TOOLS:
+
+- You may use multiple recommendation tools when appropriate.
+- Use recommend_hybrid when both tag-based and semantic recommendations
+  are useful and a combined ranking is appropriate.
+
 FACTUAL ACCURACY:
 
-- Never invent facts.
+- Never invent or assume facts about a game.
 - Only use information returned by MCP tools.
-- Before giving detailed information about a recommended game, call
-  get_game_details_tool.
-- Retrieve details for a maximum of 3 games.
+- Before giving detailed factual information about a recommended game,
+  call get_game_details_tool.
+- Retrieve details for a maximum of 3 games unless the user explicitly
+  asks for more.
+- Never invent gameplay mechanics, story details, review scores,
+  playtime, prices, features, or platform availability.
 
 FINAL RESPONSE:
 
@@ -62,10 +73,12 @@ FINAL RESPONSE:
 - Recommend the strongest matches first.
 - Explain why games fit using tool results only.
 - Mention platform compatibility when requested.
+- Do not claim facts that were not provided by an MCP tool.
 """
 
 
 def get_groq_tools(mcp_tools):
+    """Convert MCP tools into Groq function-calling format."""
 
     groq_tools = []
 
@@ -86,11 +99,14 @@ def get_groq_tools(mcp_tools):
 
 async def run_agent(
     user_query: str,
-    session: ClientSession,
+    client: Client,
     groq_tools: list
 ):
+    """
+    Run the SteamMCP agent using a persistent in-process MCP client.
+    """
 
-    client = Groq(
+    groq_client = Groq(
         api_key=os.environ.get("GROQ_API_KEY")
     )
 
@@ -107,7 +123,7 @@ async def run_agent(
 
     while True:
 
-        response = client.chat.completions.create(
+        response = groq_client.chat.completions.create(
             model="qwen/qwen3.8-27b",
             messages=messages,
             tools=groq_tools,
@@ -137,11 +153,11 @@ async def run_agent(
 
         messages.append(assistant_message)
 
-        # No tools called: final answer
+        # No tool calls means Groq has produced the final answer.
         if not message.tool_calls:
             return message.content
 
-        # Execute tools
+        # Execute requested MCP tools.
         for tool_call in message.tool_calls:
 
             tool_name = tool_call.function.name
@@ -150,9 +166,12 @@ async def run_agent(
                 tool_call.function.arguments
             )
 
-            print(f"\nCalling tool: {tool_name}")
+            print(
+                f"\nCalling tool: {tool_name}",
+                flush=True
+            )
 
-            tool_result = await session.call_tool(
+            tool_result = await client.call_tool(
                 tool_name,
                 tool_arguments
             )
@@ -166,16 +185,15 @@ async def run_agent(
 
             tool_output = "\n".join(result_content)
 
-            # Keep context small.
-            MAX_TOOL_OUTPUT_CHARS = 2000
+            # Keep the Groq request small enough for the free-tier limit.
+            max_tool_output_chars = 2000
 
-            if len(tool_output) > MAX_TOOL_OUTPUT_CHARS:
+            if len(tool_output) > max_tool_output_chars:
                 tool_output = (
-                    tool_output[:MAX_TOOL_OUTPUT_CHARS]
+                    tool_output[:max_tool_output_chars]
                     + "\n[Tool output truncated]"
                 )
 
-            # IMPORTANT: Add each tool result ONCE.
             messages.append(
                 {
                     "role": "tool",
@@ -183,14 +201,3 @@ async def run_agent(
                     "content": tool_output
                 }
             )
-
-
-async def create_mcp_connection():
-    """
-    Create parameters for the persistent MCP server connection.
-    """
-
-    return StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "src.mcp.server"]
-    )
