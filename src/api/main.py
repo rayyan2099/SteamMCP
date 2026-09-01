@@ -1,14 +1,13 @@
-from contextlib import AsyncExitStack, asynccontextmanager
-import asyncio
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from mcp import ClientSession
-from mcp.client.stdio import stdio_client
+from mcp import Client
+
+from src.mcp.server import mcp
 
 from src.agent.steam_agent import (
-    create_mcp_connection,
     get_groq_tools,
     run_agent
 )
@@ -17,18 +16,27 @@ from src.agent.steam_agent import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    app.state.mcp_session = None
-    app.state.groq_tools = None
-    app.state.mcp_lock = asyncio.Lock()
-    app.state.exit_stack = AsyncExitStack()
+    print(">>> Starting SteamMCP in-process client", flush=True)
 
-    print(">>> API startup complete", flush=True)
+    async with Client(mcp) as client:
 
-    yield
+        print(">>> MCP client connected", flush=True)
 
-    print(">>> Closing MCP resources", flush=True)
+        tools_result = await client.list_tools()
 
-    await app.state.exit_stack.aclose()
+        print(
+            f">>> Loaded {len(tools_result.tools)} MCP tools",
+            flush=True
+        )
+
+        app.state.mcp_client = client
+        app.state.groq_tools = get_groq_tools(
+            tools_result.tools
+        )
+
+        yield
+
+    print(">>> MCP client disconnected", flush=True)
 
 
 app = FastAPI(
@@ -47,96 +55,8 @@ class RecommendationResponse(BaseModel):
     recommendation: str
 
 
-async def get_mcp_resources():
-
-    print(">>> Entered get_mcp_resources", flush=True)
-
-    # Reuse existing MCP connection
-    if app.state.mcp_session is not None:
-
-        print(">>> Reusing existing MCP session", flush=True)
-
-        return (
-            app.state.mcp_session,
-            app.state.groq_tools
-        )
-
-    print(">>> Waiting for MCP lock", flush=True)
-
-    async with app.state.mcp_lock:
-
-        print(">>> MCP lock acquired", flush=True)
-
-        # Check again after acquiring lock
-        if app.state.mcp_session is not None:
-
-            print(
-                ">>> MCP session initialized by another request",
-                flush=True
-            )
-
-            return (
-                app.state.mcp_session,
-                app.state.groq_tools
-            )
-
-        print(">>> Creating MCP parameters", flush=True)
-
-        server_params = await create_mcp_connection()
-
-        print(">>> Starting MCP stdio connection", flush=True)
-
-        read_stream, write_stream = (
-            await app.state.exit_stack.enter_async_context(
-                stdio_client(server_params)
-            )
-        )
-
-        print(">>> Stdio connection opened", flush=True)
-
-        print(">>> Creating MCP session", flush=True)
-
-        session = await app.state.exit_stack.enter_async_context(
-            ClientSession(
-                read_stream,
-                write_stream
-            )
-        )
-
-        print(">>> Initializing MCP session", flush=True)
-
-        await session.initialize()
-
-        print(">>> MCP session initialized", flush=True)
-
-        print(">>> Loading MCP tools", flush=True)
-
-        tools_result = await session.list_tools()
-
-        print(">>> MCP tools loaded", flush=True)
-
-        app.state.mcp_session = session
-
-        app.state.groq_tools = get_groq_tools(
-            tools_result.tools
-        )
-
-        print(
-            ">>> SteamMCP server connected successfully",
-            flush=True
-        )
-
-        return (
-            app.state.mcp_session,
-            app.state.groq_tools
-        )
-
-
 @app.get("/")
 async def root():
-
-    print(">>> Root endpoint called", flush=True)
-
     return {
         "message": "SteamMCP API is running"
     }
@@ -152,37 +72,12 @@ async def recommend_games(
 
     try:
 
-        print(
-            ">>> /recommend request received",
-            flush=True
-        )
-
-        print(
-            ">>> Getting MCP resources",
-            flush=True
-        )
-
-        session, groq_tools = await get_mcp_resources()
-
-        print(
-            ">>> MCP resources ready",
-            flush=True
-        )
-
-        print(
-            ">>> Running agent",
-            flush=True
-        )
+        print(">>> /recommend request received", flush=True)
 
         response = await run_agent(
             user_query=request.query,
-            session=session,
-            groq_tools=groq_tools
-        )
-
-        print(
-            ">>> Agent finished",
-            flush=True
+            session=app.state.mcp_client,
+            groq_tools=app.state.groq_tools
         )
 
         return {
