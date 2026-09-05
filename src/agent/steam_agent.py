@@ -100,7 +100,8 @@ async def run_agent(
             model="qwen/qwen3.8-27b",
             messages=messages,
             tools=groq_tools,
-            tool_choice="auto"
+            tool_choice="auto",
+            max_tokens=500
         )
 
         message = response.choices[0].message
